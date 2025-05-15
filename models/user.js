@@ -1,13 +1,15 @@
 const mongoose = require("mongoose");
-const Schema = mongoose.Schema;
 
-const userSchema = new Schema({
-  email: { type: String, required: true },
-  password: { type: String, required: true },
-  username: { type: String, required: true },
-  fullname: { type: String, required: false },
-  phone: { type: Number, required: true },
-  isAdmin: { type: Boolean, required: true }
-});
+const userSchema = new mongoose.Schema(
+  {
+    email: { type: String, required: true, unique: true },
+    password: { type: String, required: true },
+    username: { type: String },
+    fullname: { type: String },
+    phone: { type: String },
+    isAdmin: { type: Boolean, default: false }
+  },
+  { timestamps: true } // Bật timestamps để tự động thêm createdAt và updatedAt
+);
 
 module.exports = mongoose.model("User", userSchema);

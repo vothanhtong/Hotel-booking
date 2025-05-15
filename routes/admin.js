@@ -31,4 +31,13 @@ router.post("/fetch-hotel", authenticateToken, adminControllers.postFetchHotel);
 
 router.post("/fetch-room", authenticateToken, adminControllers.postFetchRoom);
 
+
+router.get("/users", authenticateToken, adminControllers.getAllUsers);
+
+router.post("/create-user", authenticateToken, adminControllers.createUser);
+
+router.post("/edit-user", authenticateToken, adminControllers.editUser);
+
+router.post("/delete-user", authenticateToken, adminControllers.deleteUser);
+
 module.exports = router;

@@ -1,36 +1,45 @@
+require("dotenv").config();
 const express = require("express");
 const mongoose = require("mongoose");
-const app = express();
 const cors = require("cors");
-const MONGODB_URI = `mongodb+srv://${process.env.MONGODB_USER}:${process.env.MONGODB_PASSWORD}@booking-site.4csksum.mongodb.net/${process.env.MONGODB_DATABASE}?retryWrites=true&w=majority`;
+const morgan = require("morgan");
 
-// Models
-const Hotel = require("./models/hotel");
-const Rooms = require("./models/room");
+
+const app = express();
+
+// MongoDB URI
+const MONGODB_URI= `mongodb+srv://${process.env.MONGODB_USER}:${process.env.MONGODB_PASSWORD}@booking.3fyzyph.mongodb.net/?retryWrites=true&w=majority&appName=${process.env.MONGODB_DATABASE}`
+
+console.log(MONGODB_URI);
+
+// Middleware
+app.use(morgan("dev"));
+app.use(cors());
+app.use(express.json());
 
 // Routes
 const authRoutes = require("./routes/auth");
 const bookingRoutes = require("./routes/booking");
 const adminRoutes = require("./routes/admin");
 
-app.set("trust proxy", 1);
-app.use(
-  cors({
-    origin: [
-      "https://hotel-booking-reactjs-admin.netlify.app",
-      "https://hotel-booking-reactjs.netlify.app"
-    ],
-    credentials: true,
-    methods: ["GET, POST, PUT, DELETE, OPTIONS, HEAD"],
-    allowedHeaders: "Content-Type,Authorization"
-  })
-);
-app.use(express.json());
-
 app.use(authRoutes);
 app.use(bookingRoutes);
 app.use(adminRoutes);
 
-mongoose.connect(MONGODB_URI).then(() => {
-  app.listen(process.env.PORT || 5000);
+// Server Port
+const PORT = process.env.PORT || 8080;
+
+// Start Server
+app.listen(PORT, () => {
+  console.log(`Server is running on http://localhost:${PORT}`);
 });
+
+// Connect to MongoDB
+mongoose
+  .connect(MONGODB_URI, { useNewUrlParser: true, useUnifiedTopology: true })
+  .then(() => {
+    console.log("Connected to MongoDB");
+  })
+  .catch((err) => {
+    console.error("MongoDB connection error:", err);
+  });

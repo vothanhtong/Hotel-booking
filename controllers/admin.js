@@ -237,3 +237,91 @@ exports.postFetchRoom = async (req, res, next) => {
     console.log(err);
   }
 };
+
+
+
+// Management of users
+exports.getAllUsers = async (req, res, next) => {
+  try {
+    const allUsers = await User.find().sort({ createdAt: -1 }); // Sắp xếp theo createdAt giảm dần
+    return res.status(200).json(allUsers);
+  } catch (err) {
+    console.error("Error fetching users:", err);
+    return res.status(500).json({ error: "Internal Server Error" });
+  }
+};
+
+exports.editUser = async (req, res, next) => {
+  try {
+    const userId = req.body.id;
+    const updatedData = req.body.user;
+
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({ error: "User not found" });
+    }
+
+    // Update user fields
+    user.email = updatedData.email || user.email;
+    user.username = updatedData.username || user.username;
+    user.fullname = updatedData.fullname || user.fullname;
+    user.phone = updatedData.phone || user.phone;
+    user.isAdmin = updatedData.isAdmin !== undefined ? updatedData.isAdmin : user.isAdmin;
+
+    await user.save();
+    return res.status(200).json({ message: "User updated successfully", user });
+  } catch (err) {
+    console.error("Error editing user:", err);
+    return res.status(500).json({ error: "Internal Server Error" });
+  }
+};
+
+exports.deleteUser = async (req, res, next) => {
+  try {
+    const userId = req.body.id;
+
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({ error: "User not found" });
+    }
+
+    await User.findByIdAndDelete(userId);
+    return res.status(200).json({ message: "User deleted successfully" });
+  } catch (err) {
+    console.error("Error deleting user:", err);
+    return res.status(500).json({ error: "Internal Server Error" });
+  }
+};
+
+
+exports.createUser = async (req, res, next) => {
+  try {
+    const { email, password, username, fullname, phone, isAdmin } = req.body;
+
+    // Kiểm tra xem email đã tồn tại chưa
+    const existingUser = await User.findOne({ email });
+    if (existingUser) {
+      return res.status(400).json({ error: "Email already exists" });
+    }
+
+    // Mã hóa mật khẩu
+    const bcrypt = require("bcryptjs");
+    const hashedPassword = await bcrypt.hash(password, 10);
+
+    // Tạo người dùng mới
+    const newUser = new User({
+      email,
+      password: hashedPassword,
+      username,
+      fullname,
+      phone,
+      isAdmin: isAdmin || false
+    });
+
+    await newUser.save();
+    return res.status(201).json({ message: "User created successfully", user: newUser });
+  } catch (err) {
+    console.error("Error creating user:", err);
+    return res.status(500).json({ error: "Internal Server Error" });
+  }
+};
