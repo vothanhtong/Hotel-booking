@@ -22,9 +22,19 @@ router.post(
 );
 
 router.post(
+  "/cancel-transaction",
+  authenticateToken,
+  bookingController.cancelTransaction
+);
+
+router.post(
   "/all-transactions",
   authenticateToken,
   bookingController.getTransaction
 );
+
+router.get("/profile", authenticateToken, bookingController.getUserProfile);
+router.put("/profile", authenticateToken, bookingController.updateUserProfile);
+router.post("/change-password", authenticateToken, bookingController.changePassword);
 
 module.exports = router;

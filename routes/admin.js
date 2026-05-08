@@ -13,13 +13,15 @@ router.post(
   adminControllers.postDeleteHotel
 );
 
-router.use("/add-hotel", authenticateToken, adminControllers.addHotel);
+router.post("/add-hotel", authenticateToken, adminControllers.addHotel);
+router.put("/add-hotel", authenticateToken, adminControllers.addHotel);
 
 router.get("/room-list", authenticateToken, adminControllers.getRooms);
 
 router.post("/delete-room", authenticateToken, adminControllers.postDeleteRoom);
 
-router.use("/add-room", authenticateToken, adminControllers.postAddRoom);
+router.post("/add-room", authenticateToken, adminControllers.postAddRoom);
+router.put("/add-room", authenticateToken, adminControllers.postAddRoom);
 
 router.get(
   "/all-transactions",
@@ -39,5 +41,9 @@ router.post("/create-user", authenticateToken, adminControllers.createUser);
 router.post("/edit-user", authenticateToken, adminControllers.editUser);
 
 router.post("/delete-user", authenticateToken, adminControllers.deleteUser);
+
+router.get("/revenue-stats", authenticateToken, adminControllers.getRevenueStats);
+router.post("/update-transaction-status", authenticateToken, adminControllers.updateTransactionStatus);
+router.get("/transaction-history/:id", authenticateToken, adminControllers.getTransactionHistory);
 
 module.exports = router;

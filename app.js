@@ -8,9 +8,7 @@ const morgan = require("morgan");
 const app = express();
 
 // MongoDB URI
-const MONGODB_URI= `mongodb+srv://${process.env.MONGODB_USER}:${process.env.MONGODB_PASSWORD}@booking.3fyzyph.mongodb.net/?retryWrites=true&w=majority&appName=${process.env.MONGODB_DATABASE}`
-
-console.log(MONGODB_URI);
+const MONGODB_URI = process.env.MONGODB_URI;
 
 // Middleware
 app.use(morgan("dev"));
@@ -36,7 +34,7 @@ app.listen(PORT, () => {
 
 // Connect to MongoDB
 mongoose
-  .connect(MONGODB_URI, { useNewUrlParser: true, useUnifiedTopology: true })
+  .connect(MONGODB_URI)
   .then(() => {
     console.log("Connected to MongoDB");
   })

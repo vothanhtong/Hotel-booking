@@ -48,6 +48,7 @@ exports.getBoardInfo = async (req, res, next) => {
     });
   } catch (err) {
     console.log(err);
+    return res.status(500).json({ error: "Internal Server Error" });
   }
 };
 
@@ -57,6 +58,7 @@ exports.getHotelList = async (req, res, next) => {
     return res.status(200).json(hotelList);
   } catch (err) {
     console.log(err);
+    return res.status(500).json({ error: "Internal Server Error" });
   }
 };
 
@@ -74,6 +76,7 @@ exports.postDeleteHotel = async (req, res, next) => {
     }
   } catch (err) {
     console.log(err);
+    return res.status(500).json({ error: "Internal Server Error" });
   }
 };
 
@@ -107,14 +110,15 @@ exports.addHotel = async (req, res, next) => {
       existingHotel.photos = photos;
       existingHotel.featured = featured;
       existingHotel.rooms = rooms;
-      existingHotel.save();
+      await existingHotel.save();
     } else {
       // Add hotel to database
-      newHotel.save();
+      await newHotel.save();
     }
     return res.status(200).send();
   } catch (err) {
     console.log(err);
+    return res.status(500).json({ error: "Internal Server Error" });
   }
 };
 
@@ -125,6 +129,7 @@ exports.getRooms = async (req, res, next) => {
     return res.status(200).json(allRooms);
   } catch (err) {
     console.log(err);
+    return res.status(500).json({ error: "Internal Server Error" });
   }
 };
 
@@ -141,19 +146,20 @@ exports.postDeleteRoom = async (req, res, next) => {
       await Room.findByIdAndDelete(roomId);
       // Delete room from hotels' rooms
       const hotel = await Hotel.find({ rooms: roomId });
-      hotel.forEach((h) => {
+      for (const h of hotel) {
         const newRoomArr = h.rooms.filter(
           (room) => room.toString() !== roomId.toString()
         );
         h.rooms = newRoomArr;
-        return h.save();
-      });
+        await h.save();
+      }
       // Send back new room list
       const allRooms = await Room.find();
       return res.status(200).send(allRooms);
     }
   } catch (err) {
     console.log(err);
+    return res.status(500).json({ error: "Internal Server Error" });
   }
 };
 
@@ -183,10 +189,10 @@ exports.postAddRoom = async (req, res, next) => {
       existingRoom.desc = desc;
       existingRoom.roomNumbers = roomNumbers;
       existingRoom.updatedAt = new Date();
-      existingRoom.save();
+      await existingRoom.save();
     } else {
       // Create a new room in database
-      newRoom.save();
+      await newRoom.save();
       roomId = newRoom._id;
     }
     res.status(200).send();
@@ -196,14 +202,15 @@ exports.postAddRoom = async (req, res, next) => {
       return;
     }
     const isRoomAdded = selectedHotel.rooms.some(
-      (id) => id.toString() === roomId
+      (id) => id.toString() === roomId.toString()
     );
     if (!isRoomAdded) {
       selectedHotel.rooms = [...selectedHotel?.rooms, roomId];
-      selectedHotel.save();
+      await selectedHotel.save();
     }
   } catch (err) {
     console.log(err);
+    return res.status(500).json({ error: "Internal Server Error" });
   }
 };
 
@@ -215,6 +222,7 @@ exports.getAllTransactions = async (req, res, next) => {
     return res.status(200).json(allTransactions);
   } catch (err) {
     console.log(err);
+    return res.status(500).json({ error: "Internal Server Error" });
   }
 };
 
@@ -225,6 +233,7 @@ exports.postFetchHotel = async (req, res, next) => {
     return res.status(200).json(hotelData);
   } catch (err) {
     console.log(err);
+    return res.status(500).json({ error: "Internal Server Error" });
   }
 };
 
@@ -235,6 +244,7 @@ exports.postFetchRoom = async (req, res, next) => {
     return res.status(200).json(roomData);
   } catch (err) {
     console.log(err);
+    return res.status(500).json({ error: "Internal Server Error" });
   }
 };
 
@@ -261,12 +271,17 @@ exports.editUser = async (req, res, next) => {
       return res.status(404).json({ error: "User not found" });
     }
 
-    // Update user fields
-    user.email = updatedData.email || user.email;
+    user.email    = updatedData.email    || user.email;
     user.username = updatedData.username || user.username;
     user.fullname = updatedData.fullname || user.fullname;
-    user.phone = updatedData.phone || user.phone;
-    user.isAdmin = updatedData.isAdmin !== undefined ? updatedData.isAdmin : user.isAdmin;
+    user.phone    = updatedData.phone    || user.phone;
+    user.isAdmin  = updatedData.isAdmin !== undefined ? updatedData.isAdmin : user.isAdmin;
+
+    // Đổi mật khẩu nếu admin cung cấp
+    if (updatedData.password && updatedData.password.length >= 6) {
+      const bcrypt = require("bcryptjs");
+      user.password = await bcrypt.hash(updatedData.password, 10);
+    }
 
     await user.save();
     return res.status(200).json({ message: "User updated successfully", user });
@@ -322,6 +337,85 @@ exports.createUser = async (req, res, next) => {
     return res.status(201).json({ message: "User created successfully", user: newUser });
   } catch (err) {
     console.error("Error creating user:", err);
+    return res.status(500).json({ error: "Internal Server Error" });
+  }
+};
+
+exports.getRevenueStats = async (req, res, next) => {
+  try {
+    const year = parseInt(req.query.year) || new Date().getFullYear();
+    const months = Array.from({ length: 12 }, (_, i) => i); // 0-11
+
+    const stats = await Promise.all(
+      months.map(async (month) => {
+        const firstDay = new Date(year, month, 1);
+        const lastDay = new Date(year, month + 1, 0, 23, 59, 59);
+        const txs = await Transaction.find({
+          createdAt: { $gte: firstDay, $lte: lastDay }
+        });
+        const revenue = txs.reduce((acc, t) => acc + t.price, 0);
+        return { month: month + 1, revenue, count: txs.length };
+      })
+    );
+
+    return res.status(200).json(stats);
+  } catch (err) {
+    console.error("Error fetching revenue stats:", err);
+    return res.status(500).json({ error: "Internal Server Error" });
+  }
+};
+
+exports.updateTransactionStatus = async (req, res, next) => {
+  try {
+    const { id, status, note } = req.body;
+    const allowed = ["Booked", "Pending", "Cancelled"];
+    if (!allowed.includes(status)) {
+      return res.status(400).json({ error: "Invalid status" });
+    }
+
+    const transaction = await Transaction.findById(id);
+    if (!transaction) return res.status(404).json({ error: "Transaction not found" });
+
+    const fromStatus = transaction.status;
+
+    // Ghi lịch sử chỉnh sửa
+    transaction.editHistory.push({
+      changedBy: req.user._id,
+      fromStatus,
+      toStatus: status,
+      note: note || "",
+      changedAt: new Date()
+    });
+    transaction.status = status;
+    await transaction.save();
+
+    return res.status(200).json({ message: "Status updated", transaction });
+  } catch (err) {
+    console.error("Error updating transaction status:", err);
+    return res.status(500).json({ error: "Internal Server Error" });
+  }
+};
+
+exports.getTransactionHistory = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const transaction = await Transaction.findById(id)
+      .populate("user", "username email")
+      .populate("hotel", "name")
+      .populate("editHistory.changedBy", "username email");
+
+    if (!transaction) return res.status(404).json({ error: "Transaction not found" });
+
+    return res.status(200).json({
+      transactionId: transaction._id,
+      currentStatus: transaction.status,
+      hotel: transaction.hotel,
+      user: transaction.user,
+      createdAt: transaction.createdAt,
+      editHistory: transaction.editHistory
+    });
+  } catch (err) {
+    console.error("Error fetching transaction history:", err);
     return res.status(500).json({ error: "Internal Server Error" });
   }
 };

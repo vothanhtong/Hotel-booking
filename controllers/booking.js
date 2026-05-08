@@ -22,9 +22,7 @@ async function findAvaiableRooms(hotel, selectedStartDate, selectedEndDate) {
   });
 
   // Get unique transactions
-  const hotelTransactions = new Set(
-    hotelTransactionsAtDateRange.filter((transaction) => transaction.id)
-  );
+  const hotelTransactions = hotelTransactionsAtDateRange;
   // console.log(hotelTransactions);
 
   // Get room types of current hotel => find which room numbers of each room type are still available
@@ -116,19 +114,27 @@ exports.searchHotels = async (req, res, next) => {
       endDate = new Date(),
       adult = 1,
       children = 0,
-      room = 1
+      room = 1,
+      minPrice,
+      maxPrice,
+      minRating
     } = {
       ...req.body
     };
 
-    // 1. Find hotels that match the search location
-    // 2. Loop through each hotel & find all transactions related to that hotel
-    // 3. Count the number of avaiable rooms within search date range
-    // 4. If the number of rooms left >= search room number => add to the qualified hotel list
     const qualifiedHotels = [];
-    const cityBasedHotels = await Hotel.find({ city: location }).populate(
-      "rooms"
-    );
+    // Build city filter
+    const cityFilter = { city: location };
+    if (minPrice !== undefined || maxPrice !== undefined) {
+      cityFilter.cheapestPrice = {};
+      if (minPrice !== undefined) cityFilter.cheapestPrice.$gte = Number(minPrice);
+      if (maxPrice !== undefined) cityFilter.cheapestPrice.$lte = Number(maxPrice);
+    }
+    if (minRating !== undefined && minRating !== "") {
+      cityFilter.rating = { $gte: Number(minRating) };
+    }
+
+    const cityBasedHotels = await Hotel.find(cityFilter).populate("rooms");
     for (const hotel of cityBasedHotels) {
       const availableRooms = await findAvaiableRooms(hotel, startDate, endDate);
       // available rooms number
@@ -141,8 +147,6 @@ exports.searchHotels = async (req, res, next) => {
         (acc, val) => acc + Number(val.maxPeople) * val.roomNumbers.length,
         0
       );
-      // console.log(availableRooms);
-      // console.log(availableRoomsNum, totalPeopleCapacity);
 
       if (
         availableRoomsNum >= Number(room) &&
@@ -151,7 +155,6 @@ exports.searchHotels = async (req, res, next) => {
         qualifiedHotels.push(hotel);
       }
     }
-    // console.log(qualifiedHotels);
     return res.status(200).json(qualifiedHotels);
   } catch (err) {
     console.error("Error fetching search hotels:", err);
@@ -193,19 +196,118 @@ exports.fetchAvailableRooms = async (req, res, next) => {
   }
 };
 
-exports.postTransaction = (req, res, next) => {
-  // Add transaction to transaction collection
-  const transaction = new Transaction(req.body);
-  transaction.save();
-  return res.status(200).send();
+exports.postTransaction = async (req, res, next) => {
+  try {
+    // Add transaction to transaction collection
+    const transaction = new Transaction(req.body);
+    await transaction.save();
+    return res.status(200).json({ message: "Transaction created successfully" });
+  } catch (err) {
+    console.error("Error creating transaction:", err);
+    return res.status(500).json({ error: "Internal Server Error", message: err.message });
+  }
 };
 
-exports.getTransaction = (req, res, next) => {
-  const userId = req.body.id;
-  Transaction.find({ user: userId })
-    .populate("hotel")
-    .then((transactions) => {
-      return res.status(200).json(transactions);
-    })
-    .catch((err) => console.log(err));
+exports.cancelTransaction = async (req, res, next) => {
+  try {
+    const { transactionId } = req.body;
+    const userId = req.user?._id || req.user?.id;
+
+    const transaction = await Transaction.findById(transactionId);
+    if (!transaction) {
+      return res.status(404).json({ error: "Transaction not found" });
+    }
+    if (transaction.user.toString() !== userId.toString()) {
+      return res.status(403).json({ error: "Forbidden" });
+    }
+    if (transaction.status === "Cancelled") {
+      return res.status(400).json({ error: "Transaction already cancelled" });
+    }
+
+    transaction.status = "Cancelled";
+    await transaction.save();
+    return res.status(200).json({ message: "Transaction cancelled successfully" });
+  } catch (err) {
+    console.error("Error cancelling transaction:", err);
+    return res.status(500).json({ error: "Internal Server Error" });
+  }
+};
+
+exports.getTransaction = async (req, res, next) => {
+  try {
+    const userId = req.body.id;
+    if (!userId) {
+      return res.status(400).json({ error: "User ID is required" });
+    }
+    const transactions = await Transaction.find({ user: userId }).populate("hotel");
+    return res.status(200).json(transactions);
+  } catch (err) {
+    console.error("Error fetching transactions:", err);
+    return res.status(500).json({ error: "Internal Server Error" });
+  }
+};
+
+exports.getUserProfile = async (req, res, next) => {
+  try {
+    const User = require("../models/user");
+    const userId = req.user?._id || req.user?.id;
+    if (!userId) return res.status(401).json({ error: "Unauthorized" });
+    const user = await User.findById(userId).select("-password");
+    if (!user) return res.status(404).json({ error: "User not found" });
+    return res.status(200).json(user);
+  } catch (err) {
+    console.error("Error fetching profile:", err);
+    return res.status(500).json({ error: "Internal Server Error" });
+  }
+};
+
+exports.updateUserProfile = async (req, res, next) => {
+  try {
+    const User = require("../models/user");
+    const { fullname, phone, username } = req.body;
+    const userId = req.user?._id || req.user?.id;
+    if (!userId) return res.status(401).json({ error: "Unauthorized" });
+    const user = await User.findById(userId);
+    if (!user) return res.status(404).json({ error: "User not found" });
+
+    if (fullname) user.fullname = fullname;
+    if (phone)    user.phone    = phone;
+    if (username) user.username = username;
+    await user.save();
+
+    return res.status(200).json({
+      message: "Profile updated",
+      user: { id: user._id, email: user.email, fullname: user.fullname, phone: user.phone, username: user.username }
+    });
+  } catch (err) {
+    console.error("Error updating profile:", err);
+    return res.status(500).json({ error: "Internal Server Error" });
+  }
+};
+
+exports.changePassword = async (req, res, next) => {
+  try {
+    const bcrypt = require("bcryptjs");
+    const User = require("../models/user");
+    const { currentPassword, newPassword } = req.body;
+    const userId = req.user?._id || req.user?.id;
+    if (!userId) return res.status(401).json({ error: "Unauthorized" });
+
+    if (!newPassword || newPassword.length < 6) {
+      return res.status(400).json({ error: "New password must be at least 6 characters" });
+    }
+
+    const user = await User.findById(userId);
+    if (!user) return res.status(404).json({ error: "User not found" });
+
+    const isMatch = await bcrypt.compare(currentPassword, user.password);
+    if (!isMatch) return res.status(401).json({ error: "Current password is incorrect" });
+
+    user.password = await bcrypt.hash(newPassword, 10);
+    await user.save();
+    return res.status(200).json({ message: "Password changed successfully" });
+  } catch (err) {
+    console.error("Error changing password:", err);
+    return res.status(500).json({ error: "Internal Server Error" });
+  }
 };
