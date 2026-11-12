@@ -1,58 +1,41 @@
 const Hotel = require("../models/hotel");
 const Transaction = require("../models/transaction");
 const Room = require("../models/room");
+const isValidObjectId = require("../utils/isValidObjectId");
 
 async function findAvaiableRooms(hotel, selectedStartDate, selectedEndDate) {
-  const availableRooms = [];
-
-  const hotelTransactionsAtDateRange = await Transaction.find({
+  const hotelTransactions = await Transaction.find({
     hotel: hotel._id,
-    $or: [
-      {
-        // find all transactions whose duration is within selected date range
-        dateStart: { $lte: new Date(selectedEndDate) },
-        dateEnd: { $gte: new Date(selectedStartDate) }
-      },
-      {
-        // find all transactions whose duration is part of selected date range
-        dateStart: { $gte: new Date(selectedStartDate) },
-        dateEnd: { $lte: new Date(selectedEndDate) }
+    status: { $in: ["Booked", "Pending"] },
+    dateStart: { $lte: new Date(selectedEndDate) },
+    dateEnd: { $gte: new Date(selectedStartDate) }
+  });
+
+  if (hotelTransactions.length === 0) {
+    return hotel.rooms;
+  }
+
+  const bookedNumbersByRoom = new Map();
+  for (const transaction of hotelTransactions) {
+    for (const bookedRoom of transaction.room) {
+      const roomKey = bookedRoom.roomId.toString();
+      if (!bookedNumbersByRoom.has(roomKey)) {
+        bookedNumbersByRoom.set(roomKey, new Set());
       }
-    ]
-  });
-
-  // Get unique transactions
-  const hotelTransactions = hotelTransactionsAtDateRange;
-  // console.log(hotelTransactions);
-
-  // Get room types of current hotel => find which room numbers of each room type are still available
-  const curHotel = await Hotel.findById({ _id: hotel._id }).populate("rooms");
-  const hotelRooms = curHotel.rooms;
-
-  hotelRooms.forEach((roomType) => {
-    // If there's no transaction found => all rooms are available
-    if (hotelTransactions.length === 0) {
-      availableRooms.push(roomType);
-    } else {
-      // If there's transaction => find available rooms
-      const updatedRoomType = roomType;
-      hotelTransactions.forEach((transaction) => {
-        // each transaction has a 'room' property: [{roomId: 123, roomNumbers: 101, price: 450}, {roomId: 123, roomNumbers: 102, price: 450}]
-        transaction.room.forEach((bookedRoom) => {
-          // check if the booked room type matches the current checking room type
-          // find room numbers that aren't booked in transaction
-          if (bookedRoom.roomId.toString() === roomType._id.toString()) {
-            const availableRoomNumbers = updatedRoomType.roomNumbers.filter(
-              (num) => num !== bookedRoom.roomNumbers
-            );
-            updatedRoomType.roomNumbers = availableRoomNumbers;
-          }
-        });
-      });
-      availableRooms.push(updatedRoomType);
+      bookedNumbersByRoom.get(roomKey).add(bookedRoom.roomNumbers);
     }
+  }
+
+  return hotel.rooms.map((roomType) => {
+    const bookedNumbers = bookedNumbersByRoom.get(roomType._id.toString());
+    if (!bookedNumbers) {
+      return roomType;
+    }
+    return {
+      ...roomType.toObject(),
+      roomNumbers: roomType.roomNumbers.filter((num) => !bookedNumbers.has(num))
+    };
   });
-  return availableRooms;
 }
 
 exports.getPropertiesCount = async (req, res, next) => {
@@ -62,7 +45,7 @@ exports.getPropertiesCount = async (req, res, next) => {
 
     // get an array of promises which add an object of city & count for each city
     const promises = cities.map(async (c) => {
-      const count = await Hotel.find({ city: c }).countDocuments();
+      const count = await Hotel.countDocuments({ city: c });
       return { [c]: count };
     });
 
@@ -82,7 +65,7 @@ exports.getTypesCount = async (req, res, next) => {
 
     // get an array of promises which add an object of type & count for each hotel type
     const promises = types.map(async (t) => {
-      const count = await Hotel.find({ type: t }).countDocuments();
+      const count = await Hotel.countDocuments({ type: t });
       return { [t]: count };
     });
 
@@ -98,7 +81,7 @@ exports.getTypesCount = async (req, res, next) => {
 
 exports.getTopRatedHotels = async (req, res, next) => {
   try {
-    const topRatedHotels = await Hotel.find().sort({ rating: -1 }).limit(3);
+    const topRatedHotels = await Hotel.find().sort({ rating: -1 }).limit(3).lean();
     return res.status(200).json(topRatedHotels);
   } catch (err) {
     console.error("Error fetching top rated hotels:", err);
@@ -122,7 +105,16 @@ exports.searchHotels = async (req, res, next) => {
       ...req.body
     };
 
-    const qualifiedHotels = [];
+    const parsedStartDate = new Date(startDate);
+    const parsedEndDate = new Date(endDate);
+    if (
+      isNaN(parsedStartDate.getTime()) ||
+      isNaN(parsedEndDate.getTime()) ||
+      parsedStartDate > parsedEndDate
+    ) {
+      return res.status(400).json({ error: "Invalid date range" });
+    }
+
     // Build city filter
     const cityFilter = { city: location };
     if (minPrice !== undefined || maxPrice !== undefined) {
@@ -135,26 +127,33 @@ exports.searchHotels = async (req, res, next) => {
     }
 
     const cityBasedHotels = await Hotel.find(cityFilter).populate("rooms");
-    for (const hotel of cityBasedHotels) {
-      const availableRooms = await findAvaiableRooms(hotel, startDate, endDate);
-      // available rooms number
-      const availableRoomsNum = availableRooms.reduce(
-        (acc, val) => acc + val.roomNumbers.length,
-        0
-      );
-      // available people slots
-      const totalPeopleCapacity = availableRooms.reduce(
-        (acc, val) => acc + Number(val.maxPeople) * val.roomNumbers.length,
-        0
-      );
 
-      if (
-        availableRoomsNum >= Number(room) &&
-        totalPeopleCapacity >= Number(adult) + Number(children)
-      ) {
-        qualifiedHotels.push(hotel);
-      }
-    }
+    const hotelsWithAvailability = await Promise.all(
+      cityBasedHotels.map(async (hotel) => {
+        const availableRooms = await findAvaiableRooms(hotel, startDate, endDate);
+        // available rooms number
+        const availableRoomsNum = availableRooms.reduce(
+          (acc, val) => acc + val.roomNumbers.length,
+          0
+        );
+        // available people slots
+        const totalPeopleCapacity = availableRooms.reduce(
+          (acc, val) => acc + Number(val.maxPeople) * val.roomNumbers.length,
+          0
+        );
+        return {
+          hotel,
+          matches:
+            availableRoomsNum >= Number(room) &&
+            totalPeopleCapacity >= Number(adult) + Number(children)
+        };
+      })
+    );
+
+    const qualifiedHotels = hotelsWithAvailability
+      .filter((result) => result.matches)
+      .map((result) => result.hotel);
+
     return res.status(200).json(qualifiedHotels);
   } catch (err) {
     console.error("Error fetching search hotels:", err);
@@ -165,6 +164,9 @@ exports.searchHotels = async (req, res, next) => {
 exports.fetchHotel = async (req, res, next) => {
   try {
     const id = req.body.id;
+    if (!isValidObjectId(id)) {
+      return res.status(400).json({ error: "Invalid hotel id" });
+    }
     const fetchedHotel = await Hotel.findById(id);
     return res.status(200).json(fetchedHotel);
   } catch (err) {
@@ -179,8 +181,25 @@ exports.fetchAvailableRooms = async (req, res, next) => {
     const startDate = req.body.startDate;
     const endDate = req.body.endDate;
 
+    if (!isValidObjectId(_id)) {
+      return res.status(400).json({ error: "Invalid hotel id" });
+    }
+
+    const parsedStartDate = new Date(startDate);
+    const parsedEndDate = new Date(endDate);
+    if (
+      isNaN(parsedStartDate.getTime()) ||
+      isNaN(parsedEndDate.getTime()) ||
+      parsedStartDate > parsedEndDate
+    ) {
+      return res.status(400).json({ error: "Invalid date range" });
+    }
+
     // Get current hotel with rooms property populated
     const curHotel = await Hotel.findById(_id).populate("rooms");
+    if (!curHotel) {
+      return res.status(404).json({ error: "Hotel not found" });
+    }
 
     // Get array of avaiableRooms
     const availableRooms = await findAvaiableRooms(
@@ -212,6 +231,10 @@ exports.cancelTransaction = async (req, res, next) => {
   try {
     const { transactionId } = req.body;
     const userId = req.user?._id || req.user?.id;
+
+    if (!isValidObjectId(transactionId)) {
+      return res.status(400).json({ error: "Invalid transaction id" });
+    }
 
     const transaction = await Transaction.findById(transactionId);
     if (!transaction) {
